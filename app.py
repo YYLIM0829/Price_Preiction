@@ -55,8 +55,10 @@ def check_festival(date):
         if month == info['month']:
             return info
     return None
+    
 @app.route('/update_festivals', methods=['POST'])
 def update_festivals():
+    global festivals
     try:
         data = request.json
         name = data.get("name")
