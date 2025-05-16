@@ -14,6 +14,14 @@ warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
 
+@app.route('/env')
+def get_env_variables():
+    env_vars = {
+        "FLASK_ENV": os.getenv("FLASK_ENV", "development"),
+        "SECRET_KEY": os.getenv("SECRET_KEY", "not-set")
+    }
+    return jsonify(env_vars)
+    
 @app.route('/')
 def home():
     return "Price Prediction API is running. Use POST /predict to get predictions."
