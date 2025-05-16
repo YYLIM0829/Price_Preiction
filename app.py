@@ -30,6 +30,31 @@ def home():
     
 festivals_lock = threading.Lock()
 
+
+festivals = {
+    'Chinese New Year': {'month': 2, 'effect': 'up', 'range': (5, 15)},
+    'Labour Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
+    'Hari Raya Aidilfitri': {'month': 4, 'effect': 'down', 'range': (10, 30)},
+    'Father\'s Day': {'month': 6, 'effect': 'down', 'range': (10, 30)},
+    'Mother\'s Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
+    'Deepavali': {'month': 11, 'effect': 'down', 'range': (10, 25)},
+    'Christmas': {'month': 12, 'effect': 'down', 'range': (10, 20)},
+    'Merdeka Day': {'month': 8, 'effect': 'down', 'range': (5, 15)},
+    '11.11 Sale': {'month': 11, 'effect': 'down', 'range': (20, 50)},
+    'Black Friday': {'month': 11, 'effect': 'down', 'range': (30, 60)},
+    'Year-End Sale': {'month': 12, 'effect': 'down', 'range': (15, 40)},
+}
+
+@app.route('/festivals', methods=['GET'])
+def get_festivals():
+    return jsonify({"festivals": festivals})
+
+def check_festival(date):
+    month = date.month
+    for fest, info in festivals.items():
+        if month == info['month']:
+            return info
+    return None
 @app.route('/update_festivals', methods=['POST'])
 def update_festivals():
     try:
@@ -56,31 +81,6 @@ def update_festivals():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-festivals = {
-    'Chinese New Year': {'month': 2, 'effect': 'up', 'range': (5, 15)},
-    'Labour Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
-    'Hari Raya Aidilfitri': {'month': 4, 'effect': 'down', 'range': (10, 30)},
-    'Father\'s Day': {'month': 6, 'effect': 'down', 'range': (10, 30)},
-    'Mother\'s Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
-    'Deepavali': {'month': 11, 'effect': 'down', 'range': (10, 25)},
-    'Christmas': {'month': 12, 'effect': 'down', 'range': (10, 20)},
-    'Merdeka Day': {'month': 8, 'effect': 'down', 'range': (5, 15)},
-    '11.11 Sale': {'month': 11, 'effect': 'down', 'range': (20, 50)},
-    'Black Friday': {'month': 11, 'effect': 'down', 'range': (30, 60)},
-    'Year-End Sale': {'month': 12, 'effect': 'down', 'range': (15, 40)},
-}
-
-@app.route('/festivals', methods=['GET'])
-def get_festivals():
-    return jsonify({"festivals": festivals})
-
-def check_festival(date):
-    month = date.month
-    for fest, info in festivals.items():
-        if month == info['month']:
-            return info
-    return None
 
 # Feature creation helper
 def create_features(df, window=7):
