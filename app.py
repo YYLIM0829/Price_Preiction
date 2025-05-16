@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 import warnings
+import threading
 
 warnings.filterwarnings('ignore')
 
@@ -25,8 +26,35 @@ def get_env_variables():
 @app.route('/')
 def home():
     return "Price Prediction API is running. Use POST /predict to get predictions."
+    
+festivals_lock = threading.Lock()
 
-# Festival info for adjustment
+@app.route('/update_festivals', methods=['POST'])
+def update_festivals():
+    try:
+        data = request.json
+        name = data.get("name")
+        month = data.get("month")
+        effect = data.get("effect")
+        range_vals = data.get("range") 
+
+        if not all([name, month, effect, range_vals]):
+            return jsonify({'error': 'Missing one or more required fields'}), 400
+
+        if effect not in ['up', 'down']:
+            return jsonify({'error': 'Effect must be "up" or "down"'}), 400
+
+        with festivals_lock:
+            festivals[name] = {
+                "month": month,
+                "effect": effect,
+                "range": tuple(range_vals)
+            }
+
+        return jsonify({'message': f'Festival "{name}" added/updated successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+        
 festivals = {
     'Chinese New Year': {'month': 2, 'effect': 'up', 'range': (5, 15)},
     'Labour Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
