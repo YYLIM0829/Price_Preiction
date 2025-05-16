@@ -54,7 +54,12 @@ def update_festivals():
         return jsonify({'message': f'Festival "{name}" added/updated successfully'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-        
+
+
+@app.route('/festivals', methods=['GET'])
+def get_festivals():
+    return jsonify({"festivals": festivals})
+
 festivals = {
     'Chinese New Year': {'month': 2, 'effect': 'up', 'range': (5, 15)},
     'Labour Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
