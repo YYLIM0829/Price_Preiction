@@ -1,213 +1,480 @@
-from flask import Flask, request, jsonify
 import pandas as pd
 import numpy as np
-from datetime import timedelta
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error
+from datetime import datetime, timedelta
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-import warnings
-import threading
-import os
+from google.cloud import firestore
+import pytz
+import requests
+import io
+import matplotlib.pyplot as plt
+from dateutil.relativedelta import relativedelta
+import holidays
+from ipywidgets import interact, Dropdown, DatePicker, Output
+from IPython.display import display
 
-warnings.filterwarnings('ignore')
+# Initialize Firestore client
+db = firestore.Client.from_service_account_json('service_account_key.json')
 
-app = Flask(__name__)
-
-@app.route('/env')
-def get_env_variables():
-    env_vars = {
-        "FLASK_ENV": os.getenv("FLASK_ENV", "development"),
-        "SECRET_KEY": os.getenv("SECRET_KEY", "not-set")
+# Constants
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/yourusername/yourrepo/main/product_prices_history.csv"
+LOCAL_TZ = pytz.timezone('Asia/Singapore')  # UTC+8
+FESTIVAL_DISCOUNTS = {
+    'Chinese New Year': {
+        'discount': {'gifts': (0.10, 0.20), 'electronics': (0.10, 0.20)},
+        'price_increase': {'food': (0.05, 0.15), 'beverages': (0.05, 0.15)},
+        'duration': 7
+    },
+    'Labour Day': {
+        'discount': {'all': (0.05, 0.15)},
+        'duration': 1
+    },
+    'Hari Raya': {
+        'discount': {'food': (0.10, 0.30), 'clothing': (0.10, 0.30)},
+        'duration': 7
+    },
+    'Father\'s Day': {
+        'discount': {'all': (0.05, 0.15)},
+        'duration': 7
+    },
+    'Mother\'s Day': {
+        'discount': {'all': (0.05, 0.15)},
+        'duration': 7
+    },
+    'Deepavali': {
+        'discount': {'electronics': (0.10, 0.25), 'food': (0.10, 0.25)},
+        'duration': 7
+    },
+    'Christmas': {
+        'discount': {'gifts': (0.10, 0.20), 'electronics': (0.10, 0.20)},
+        'duration': 7
+    },
+    'National Day': {
+        'discount': {'all': (0.05, 0.15)},
+        'duration': 1
+    },
+    '11.11 Sale': {
+        'discount': {'all': (0.20, 0.50)},
+        'duration': 1
+    },
+    'Black Friday': {
+        'discount': {'electronics': (0.30, 0.60), 'fashion': (0.30, 0.60)},
+        'duration': 1
+    },
+    'Year-End Sale': {
+        'discount': {'clothing': (0.15, 0.40), 'appliances': (0.15, 0.40)},
+        'duration': 14
     }
-    return jsonify(env_vars)
-    
-@app.route('/')
-def home():
-    return "Price Prediction API is running. Use POST /predict to get predictions."
-    
-festivals_lock = threading.Lock()
-
-
-festivals = {
-    'Chinese New Year': {'month': 2, 'effect': 'up', 'range': (5, 15)},
-    'Labour Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
-    'Hari Raya Aidilfitri': {'month': 4, 'effect': 'down', 'range': (10, 30)},
-    'Father\'s Day': {'month': 6, 'effect': 'down', 'range': (10, 30)},
-    'Mother\'s Day': {'month': 5, 'effect': 'down', 'range': (10, 30)},
-    'Deepavali': {'month': 11, 'effect': 'down', 'range': (10, 25)},
-    'Christmas': {'month': 12, 'effect': 'down', 'range': (10, 20)},
-    'Merdeka Day': {'month': 8, 'effect': 'down', 'range': (5, 15)},
-    '11.11 Sale': {'month': 11, 'effect': 'down', 'range': (20, 50)},
-    'Black Friday': {'month': 11, 'effect': 'down', 'range': (30, 60)},
-    'Year-End Sale': {'month': 12, 'effect': 'down', 'range': (15, 40)},
 }
 
-@app.route('/festivals', methods=['GET'])
-def get_festivals():
-    return jsonify({"festivals": festivals})
+# Malaysian holidays for price adjustments
+malaysia_holidays = holidays.Malaysia()
 
-def check_festival(date):
-    month = date.month
-    for fest, info in festivals.items():
-        if month == info['month']:
-            return info
-    return None
+def is_festival_period(date):
+    """Check if date falls within any festival period"""
+    date_str = date.strftime('%Y-%m-%d')
     
-@app.route('/update_festivals', methods=['POST'])
-def update_festivals():
-    global festivals
-    try:
-        data = request.json
-        name = data.get("name")
-        month = data.get("month")
-        effect = data.get("effect")
-        range_vals = data.get("range") 
+    # Fixed date festivals
+    festivals = {
+        'Chinese New Year': [(1, 22), (1, 23)],  # Example dates for 2023
+        'Labour Day': [(5, 1)],
+        'Hari Raya': [(4, 21)],  # Example date
+        'Father\'s Day': [(6, 18)],  # 3rd Sunday of June
+        'Mother\'s Day': [(5, 14)],  # 2nd Sunday of May
+        'Deepavali': [(10, 24)],  # Example date
+        'Christmas': [(12, 25)],
+        'National Day': [(8, 31)],
+        '11.11 Sale': [(11, 11)],
+        'Black Friday': [(11, 25)],  # 4th Friday of November
+        'Year-End Sale': [(12, 15)]  # Starts Dec 15 for example
+    }
+    
+    current_year = date.year
+    month_day = (date.month, date.day)
+    
+    for festival, dates in festivals.items():
+        for m, d in dates:
+            festival_date = datetime(current_year, m, d).date()
+            duration = FESTIVAL_DISCOUNTS[festival]['duration']
+            end_date = festival_date + timedelta(days=duration-1)
+            
+            if festival_date <= date.date() <= end_date:
+                return festival, festival_date
+                
+    return None, None
 
-        if not all([name, month, effect, range_vals]):
-            return jsonify({'error': 'Missing one or more required fields'}), 400
+def get_festival_discount(category, festival):
+    """Get discount range for a category during festival"""
+    if festival not in FESTIVAL_DISCOUNTS:
+        return 0
+    
+    festival_data = FESTIVAL_DISCOUNTS[festival]
+    
+    # Check category-specific discounts first
+    if 'discount' in festival_data:
+        for discount_category, discount_range in festival_data['discount'].items():
+            if discount_category == 'all' or discount_category in category.lower():
+                return np.random.uniform(*discount_range)
+    
+    return 0
 
-        if effect not in ['up', 'down']:
-            return jsonify({'error': 'Effect must be "up" or "down"'}), 400
+def get_festival_price_increase(category, festival):
+    """Get price increase range for high-demand categories during festival"""
+    if festival not in FESTIVAL_DISCOUNTS:
+        return 0
+    
+    festival_data = FESTIVAL_DISCOUNTS[festival]
+    
+    if 'price_increase' in festival_data:
+        for inc_category, inc_range in festival_data['price_increase'].items():
+            if inc_category in category.lower():
+                return np.random.uniform(*inc_range)
+    
+    return 0
 
-        with festivals_lock:
-            festivals[name] = {
-                "month": month,
-                "effect": effect,
-                "range": tuple(range_vals)
-            }
-
-        return jsonify({'message': f'Festival "{name}" added/updated successfully'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# Feature creation helper
-def create_features(df, window=7):
-    X, y = [], []
-    for i in range(len(df) - window):
-        X.append(df['Final Price'].iloc[i:i+window].values)
-        y.append(df['Final Price'].iloc[i+window])
-    return np.array(X), np.array(y)
-
-# Evaluation function
-def evaluate(y_true, y_pred):
-    mae = mean_absolute_error(y_true, y_pred)
-    return mae
-
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.json
-    product_name = data.get('product_name')
-
-    if not product_name:
-        return jsonify({'error': 'Please provide product_name in JSON'}), 400
-
-    # Load and preprocess data
-    df = pd.read_csv('product_daily_prices_2022_2025_monthly_changes.csv')
-    df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
-
-
-    product_data = df[df['Product'] == product_name].copy()
-
-    if product_data.empty:
-        return jsonify({'error': f'Product "{product_name}" not found'}), 404
-
-    product_data = product_data.sort_values('Date')
-
-    X, y = create_features(product_data)
-
-    # Train/test split (no shuffle to maintain time order)
-    split_index = int(len(X) * 0.8)
-    X_train, X_test = X[:split_index], X[split_index:]
-    y_train, y_test = y[:split_index], y[split_index:]
-
-    # Train models
-    knn = KNeighborsRegressor(n_neighbors=10)
-    knn.fit(X_train, y_train)
-    knn_pred = knn.predict(X_test)
-    knn_mae = evaluate(y_test, knn_pred)
-
-    rf = RandomForestRegressor(n_estimators=100, random_state=42)
-    rf.fit(X_train, y_train)
-    rf_pred = rf.predict(X_test)
-    rf_mae = evaluate(y_test, rf_pred)
-
-    # Prepare data for LSTM
-    X_train_lstm = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
-    X_test_lstm = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
-
-    lstm_model = Sequential()
-    lstm_model.add(LSTM(64, input_shape=(X_train_lstm.shape[1], 1)))
-    lstm_model.add(Dense(1))
-    lstm_model.compile(optimizer='adam', loss='mse')
-    lstm_model.fit(X_train_lstm, y_train, epochs=50, batch_size=16, verbose=0)
-
-    lstm_pred = lstm_model.predict(X_test_lstm).flatten()
-    lstm_mae = evaluate(y_test, lstm_pred)
-
-    # Pick best model (lowest MAE)
-    maes = [knn_mae, rf_mae, lstm_mae]
-    models = ['KNN', 'Random Forest', 'LSTM']
-    best_index = np.argmin(maes)
-    best_model_name = models[best_index]
-
-    # Prepare to predict next 7 days
-    last_window = product_data['Final Price'].iloc[-7:].values.reshape(1, -1)
-    next_prices = []
-
-    if best_model_name == 'KNN':
-        current_window = last_window.copy()
-        for _ in range(7):
-            pred = knn.predict(current_window)[0]
-            next_prices.append(pred)
-            current_window = np.append(current_window[:,1:], [[pred]], axis=1)
-    elif best_model_name == 'Random Forest':
-        current_window = last_window.copy()
-        for _ in range(7):
-            pred = rf.predict(current_window)[0]
-            next_prices.append(pred)
-            current_window = np.append(current_window[:,1:], [[pred]], axis=1)
-    else:
-        current_window = last_window.reshape((1, 7, 1))
-        for _ in range(7):
-            pred = lstm_model.predict(current_window).flatten()[0]
-            next_prices.append(pred)
-            new_window = np.append(current_window.flatten()[1:], [pred])
-            current_window = new_window.reshape((1, 7, 1))
-
-    # Apply festival adjustments
-    start_date = product_data['Date'].max() + timedelta(days=1)
-    predicted_dates = [start_date + timedelta(days=i) for i in range(7)]
-    adjusted_prices = []
-
-    for date, price in zip(predicted_dates, next_prices):
-        festival = check_festival(date)
-        if festival:
-            range_min, range_max = festival['range']
-            adjustment = np.random.uniform(range_min, range_max)
-            if festival['effect'] == 'up':
-                price *= (1 + adjustment / 100)
-            else:
-                price *= (1 - adjustment / 100)
-        adjusted_prices.append(price)
-
-    # Format results for JSON
-    results = []
-    for d, p in zip(predicted_dates, adjusted_prices):
-        results.append({
-            'date': d.strftime('%Y-%m-%d'),
-            'predicted_price': round(float(p), 2)
+def load_data_from_firestore():
+    """Load product data from Firestore"""
+    products_ref = db.collection('products')
+    docs = products_ref.stream()
+    
+    data = []
+    for doc in docs:
+        product = doc.to_dict()
+        data.append({
+            'name': product.get('name', ''),
+            'type': product.get('type', ''),
+            'price': product.get('price', 0),
+            'future_price': product.get('future_price', 0),
+            'last_updated': product.get('last_updated', datetime.now()).astimezone(LOCAL_TZ)
         })
+    
+    return pd.DataFrame(data)
 
-    return jsonify({
-        'product': product_name,
-        'best_model': best_model_name,
-        'predictions': results
+def load_historical_data():
+    """Load historical data from GitHub"""
+    try:
+        response = requests.get(GITHUB_RAW_URL)
+        response.raise_for_status()
+        return pd.read_csv(io.StringIO(response.text))
+    except:
+        # Return empty DataFrame if file doesn't exist
+        return pd.DataFrame(columns=['date', 'product', 'category', 'price', 'predicted_price', 'discount', 'festival'])
+
+def save_data_to_github(df):
+    """Save updated data back to GitHub (you'll need to implement proper GitHub API calls)"""
+    # This is a placeholder - in practice you'd use GitHub API or git commands
+    # For Colab, you might want to save to Google Drive instead
+    df.to_csv('product_prices_history.csv', index=False)
+    print("Data saved locally - implement GitHub upload separately")
+
+def prepare_data_for_prediction(historical_df, product_name, category):
+    """Prepare time series data for a specific product"""
+    product_data = historical_df[historical_df['product'] == product_name].copy()
+    product_data['date'] = pd.to_datetime(product_data['date'])
+    product_data = product_data.set_index('date').sort_index()
+    
+    # Handle missing dates (forward fill)
+    all_dates = pd.date_range(start=product_data.index.min(), end=product_data.index.max())
+    product_data = product_data.reindex(all_dates)
+    product_data['price'] = product_data['price'].ffill()
+    product_data['product'] = product_name
+    product_data['category'] = category
+    
+    # Feature engineering
+    product_data['day_of_week'] = product_data.index.dayofweek
+    product_data['day_of_month'] = product_data.index.day
+    product_data['month'] = product_data.index.month
+    product_data['year'] = product_data.index.year
+    
+    # Add festival indicator
+    product_data['festival'] = product_data.index.map(lambda x: is_festival_period(x)[0] or '')
+    
+    return product_data.dropna()
+
+def knn_predict(product_data, days_ahead=1):
+    """KNN prediction model"""
+    X = product_data[['day_of_week', 'day_of_month', 'month', 'year']]
+    y = product_data['price']
+    
+    # Split data (last 'days_ahead' days for testing)
+    X_train, X_test = X[:-days_ahead], X[-days_ahead:]
+    y_train, y_test = y[:-days_ahead], y[-days_ahead:]
+    
+    model = KNeighborsRegressor(n_neighbors=5)
+    model.fit(X_train, y_train)
+    
+    # Predict next day
+    next_day_features = pd.DataFrame({
+        'day_of_week': [(product_data.index[-1].dayofweek + days_ahead) % 7],
+        'day_of_month': [(product_data.index[-1].day + days_ahead) % 31],
+        'month': [product_data.index[-1].month],
+        'year': [product_data.index[-1].year]
     })
+    
+    prediction = model.predict(next_day_features)[0]
+    mae = mean_absolute_error(y_test, model.predict(X_test)) if len(y_test) > 0 else np.nan
+    
+    return prediction, mae
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+def random_forest_predict(product_data, days_ahead=1):
+    """Random Forest prediction model"""
+    X = product_data[['day_of_week', 'day_of_month', 'month', 'year']]
+    y = product_data['price']
+    
+    # Split data
+    X_train, X_test = X[:-days_ahead], X[-days_ahead:]
+    y_train, y_test = y[:-days_ahead], y[-days_ahead:]
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    # Predict next day
+    next_day_features = pd.DataFrame({
+        'day_of_week': [(product_data.index[-1].dayofweek + days_ahead) % 7],
+        'day_of_month': [(product_data.index[-1].day + days_ahead) % 31],
+        'month': [product_data.index[-1].month],
+        'year': [product_data.index[-1].year]
+    })
+    
+    prediction = model.predict(next_day_features)[0]
+    mae = mean_absolute_error(y_test, model.predict(X_test)) if len(y_test) > 0 else np.nan
+    
+    return prediction, mae
+
+def lstm_predict(product_data, days_ahead=1):
+    """LSTM prediction model"""
+    # Normalize data
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(product_data[['price']])
+    
+    # Prepare sequences
+    sequence_length = 7
+    X, y = [], []
+    for i in range(len(scaled_data) - sequence_length - days_ahead + 1):
+        X.append(scaled_data[i:i+sequence_length])
+        y.append(scaled_data[i+sequence_length:i+sequence_length+days_ahead])
+    
+    X = np.array(X)
+    y = np.array(y)
+    
+    # Split data
+    split = int(0.8 * len(X))
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+    
+    # Build LSTM model
+    model = Sequential([
+        LSTM(50, activation='relu', input_shape=(sequence_length, 1)),
+        Dense(days_ahead)
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    
+    model.fit(X_train, y_train, epochs=20, verbose=0)
+    
+    # Predict
+    last_sequence = scaled_data[-sequence_length:]
+    prediction = model.predict(last_sequence.reshape(1, sequence_length, 1))
+    prediction = scaler.inverse_transform(prediction)[0][-1]
+    
+    # Calculate MAE if we have test data
+    if len(X_test) > 0:
+        y_pred = model.predict(X_test)
+        y_pred = scaler.inverse_transform(y_pred.reshape(-1, days_ahead))
+        y_true = scaler.inverse_transform(y_test.reshape(-1, days_ahead))
+        mae = mean_absolute_error(y_true, y_pred)
+    else:
+        mae = np.nan
+    
+    return prediction, mae
+
+def predict_product_price(product_name, category, historical_data, days_ahead=1):
+    """Predict price using all models and return the best prediction"""
+    product_data = prepare_data_for_prediction(historical_data, product_name, category)
+    
+    if len(product_data) < 7:  # Not enough data
+        return None, {'knn': None, 'rf': None, 'lstm': None}
+    
+    # Get predictions from all models
+    knn_pred, knn_mae = knn_predict(product_data, days_ahead)
+    rf_pred, rf_mae = random_forest_predict(product_data, days_ahead)
+    lstm_pred, lstm_mae = lstm_predict(product_data, days_ahead)
+    
+    # Adjust for festivals
+    target_date = datetime.now(LOCAL_TZ) + timedelta(days=days_ahead)
+    festival, festival_date = is_festival_period(target_date)
+    
+    if festival:
+        discount = get_festival_discount(category, festival)
+        price_increase = get_festival_price_increase(category, festival)
+        
+        knn_pred *= (1 - discount) * (1 + price_increase)
+        rf_pred *= (1 - discount) * (1 + price_increase)
+        lstm_pred *= (1 - discount) * (1 + price_increase)
+    
+    # Select model with lowest MAE (when available)
+    models = {
+        'knn': {'pred': knn_pred, 'mae': knn_mae},
+        'rf': {'pred': rf_pred, 'mae': rf_mae},
+        'lstm': {'pred': lstm_pred, 'mae': lstm_mae}
+    }
+    
+    # Filter out models with no MAE (insufficient test data)
+    valid_models = {k: v for k, v in models.items() if not np.isnan(v['mae'])}
+    
+    if valid_models:
+        best_model = min(valid_models.items(), key=lambda x: x[1]['mae'])
+        return best_model[1]['pred'], models
+    else:
+        # If no model has MAE (all predictions on training data), use LSTM as default
+        return lstm_pred, models
+
+def update_firestore_predictions():
+    """Main function to update all product predictions in Firestore"""
+    # Load current data
+    current_products = load_data_from_firestore()
+    historical_data = load_historical_data()
+    
+    # Prepare today's date
+    today = datetime.now(LOCAL_TZ).strftime('%Y-%m-%d')
+    
+    # Update historical data with current prices
+    new_rows = []
+    for _, row in current_products.iterrows():
+        new_rows.append({
+            'date': today,
+            'product': row['name'],
+            'category': row['type'],
+            'price': row['price'],
+            'predicted_price': row['future_price'],
+            'discount': 0,  # Will be calculated during prediction
+            'festival': ''
+        })
+    
+    updated_data = pd.concat([historical_data, pd.DataFrame(new_rows)], ignore_index=True)
+    
+    # Predict next day's prices and update Firestore
+    for _, row in current_products.iterrows():
+        predicted_price, model_results = predict_product_price(
+            row['name'], row['type'], updated_data
+        )
+        
+        if predicted_price is not None:
+            # Update Firestore
+            product_ref = db.collection('products').where('name', '==', row['name']).limit(1).get()
+            for doc in product_ref:
+                doc.reference.update({
+                    'future_price': float(predicted_price),
+                    'last_updated': datetime.now(LOCAL_TZ)
+                })
+    
+    # Save updated historical data
+    save_data_to_github(updated_data)
+    print("Price predictions updated successfully")
+
+def predict_preorder_price(product_name, category, target_date, historical_data):
+    """Predict price for a specific future date (preorder)"""
+    today = datetime.now(LOCAL_TZ)
+    days_ahead = (target_date - today.date()).days
+    
+    if days_ahead <= 0:
+        return None, "Target date must be in the future"
+    
+    predicted_price, model_results = predict_product_price(
+        product_name, category, historical_data, days_ahead
+    )
+    
+    return predicted_price, model_results
+
+# Admin Interface
+def create_admin_interface():
+    """Create interactive admin interface for model evaluation"""
+    historical_data = load_historical_data()
+    products = historical_data['product'].unique()
+    
+    product_dropdown = Dropdown(
+        options=products,
+        description='Product:',
+        disabled=False
+    )
+    
+    model_dropdown = Dropdown(
+        options=['knn', 'rf', 'lstm', 'all'],
+        description='Model:',
+        value='all'
+    )
+    
+    date_picker = DatePicker(
+        description='Target Date:',
+        value=datetime.now(LOCAL_TZ).date() + timedelta(days=1)
+    )
+    
+    output = Output()
+    
+    def on_parameter_change(change):
+        with output:
+            output.clear_output()
+            
+            product_name = product_dropdown.value
+            model_type = model_dropdown.value
+            target_date = date_picker.value
+            
+            if not product_name:
+                return
+                
+            category = historical_data[historical_data['product'] == product_name]['category'].iloc[0]
+            product_data = prepare_data_for_prediction(historical_data, product_name, category)
+            
+            # Plot historical prices
+            plt.figure(figsize=(12, 6))
+            plt.plot(product_data.index, product_data['price'], label='Historical Prices')
+            plt.title(f'Price History for {product_name}')
+            plt.xlabel('Date')
+            plt.ylabel('Price')
+            plt.legend()
+            plt.grid()
+            plt.show()
+            
+            # Get prediction
+            days_ahead = (target_date - datetime.now(LOCAL_TZ).date()).days
+            if days_ahead <= 0:
+                print("Please select a future date")
+                return
+                
+            predicted_price, model_results = predict_product_price(
+                product_name, category, historical_data, days_ahead
+            )
+            
+            print(f"Predicted price for {target_date}: ${predicted_price:.2f}\n")
+            
+            if model_type == 'all':
+                print("Model Performance:")
+                for model_name, result in model_results.items():
+                    if result['mae'] is not None:
+                        print(f"{model_name.upper()}: MAE = {result['mae']:.2f}, Prediction = {result['pred']:.2f}")
+                    else:
+                        print(f"{model_name.upper()}: Not enough data for MAE, Prediction = {result['pred']:.2f}")
+            else:
+                result = model_results[model_type]
+                if result['mae'] is not None:
+                    print(f"{model_type.upper()} MAE: {result['mae']:.2f}")
+                else:
+                    print(f"{model_type.upper()}: Not enough data for MAE calculation")
+    
+    product_dropdown.observe(on_parameter_change, names='value')
+    model_dropdown.observe(on_parameter_change, names='value')
+    date_picker.observe(on_parameter_change, names='value')
+    
+    display(product_dropdown, model_dropdown, date_picker, output)
+    on_parameter_change(None)  # Initial call
+
+# Main execution
+if __name__ == "__main__":
+    # For daily runs in Colab
+    update_firestore_predictions()
+    
+    # Uncomment to enable admin interface when running interactively
+    # create_admin_interface()
