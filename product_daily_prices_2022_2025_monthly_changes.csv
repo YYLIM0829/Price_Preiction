@@ -1,4 +1,4 @@
-date,product,types,price,predicted_price,discount(%),festivals
+date,product,types,price,predicted_price,discount,festivals
 1/1/2022,Durian Fruit,fruit,27.25,27.25,0,
 1/1/2022,product2,"watch, sport",398.61,398.61,0,
 1/1/2022,product3,"phone, sport",199.7,199.7,0,
