@@ -1,4 +1,8 @@
-test
-1
-2
-3
+date,product,category,price,predicted_price,discount,festival
+2025-06-07 17:51:23+0800,Durian Fruit,fruit,23.93,23.93,0.0,
+2025-06-07 17:51:23+0800,product2,"watch,sport",488.77,488.77,0.0,
+2025-06-07 17:51:23+0800,product3,"phone,sport",170.16,170.16,0.0,
+2025-06-07 17:51:23+0800,product4,sport,3583.82,3583.82,0.0,
+2025-06-07 17:51:23+0800,product5,"toy,watch",8.68,8.68,0.0,
+2025-06-07 17:51:23+0800,Mango Fruit,fruit,10.86,10.86,0.0,
+2025-06-07 17:51:23+0800,product6,toy,118.85,118.85,0.0,
