@@ -1,1 +1,83 @@
-.
+{
+  "festivals": {
+    "Chinese New Year": {
+      "month": 1,
+      "effect": "mixed",
+      "discount_range": [0.10, 0.20],
+      "discount_categories": "gifts,electronics",
+      "price_increase_range": [0.05, 0.15],
+      "price_increase_categories": "food,beverages",
+      "duration": 7
+    },
+    "Labour Day": {
+      "month": 5,
+      "effect": "down",
+      "range": [0.05, 0.15],
+      "categories": "all",
+      "duration": 1
+    },
+    "Hari Raya": {
+      "month": 4,
+      "effect": "down",
+      "range": [0.10, 0.30],
+      "categories": "food,clothing",
+      "duration": 7
+    },
+    "Father's Day": {
+      "month": 6,
+      "effect": "down",
+      "range": [0.05, 0.15],
+      "categories": "all",
+      "duration": 7
+    },
+    "Mother's Day": {
+      "month": 5,
+      "effect": "down",
+      "range": [0.05, 0.15],
+      "categories": "all",
+      "duration": 7
+    },
+    "Deepavali": {
+      "month": 10,
+      "effect": "down",
+      "range": [0.10, 0.25],
+      "categories": "electronics,food",
+      "duration": 7
+    },
+    "Christmas": {
+      "month": 12,
+      "effect": "down",
+      "range": [0.10, 0.20],
+      "categories": "gifts,electronics",
+      "duration": 7
+    },
+    "National Day": {
+      "month": 8,
+      "effect": "down",
+      "range": [0.05, 0.15],
+      "categories": "all",
+      "duration": 1
+    },
+    "11.11 Sale": {
+      "month": 11,
+      "effect": "down",
+      "range": [0.20, 0.50],
+      "categories": "all",
+      "duration": 1
+    },
+    "Black Friday": {
+      "month": 11,
+      "effect": "down",
+      "range": [0.30, 0.60],
+      "categories": "electronics,fashion",
+      "duration": 1
+    },
+    "Year-End Sale": {
+      "month": 12,
+      "effect": "down",
+      "range": [0.15, 0.40],
+      "categories": "clothing,appliances",
+      "duration": 14
+    }
+  }
+}
