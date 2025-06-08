@@ -252,7 +252,7 @@ def save_data_to_github(df):
         print(f"Data saved locally to {local_path}")
 
         # Check if GitHub token is available
-        github_token = os.getenv('GITHUB_TOKEN') or "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"
+        github_token = os.getenv('GITHUB_TOKEN') 
         if not github_token:
             print("GitHub token not found. Data saved locally only.")
             return False
