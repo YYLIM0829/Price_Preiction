@@ -2,11 +2,9 @@
   "festivals": {
     "Chinese New Year": {
       "month": 1,
-      "effect": "mixed",
-      "discount_range": [0.10, 0.20],
-      "discount_categories": "gifts,electronics",
-      "price_increase_range": [0.05, 0.15],
-      "price_increase_categories": "food,beverages",
+      "effect": "down",
+      "range": [0.10, 0.20],
+      "categories": "gifts,electronics",
       "duration": 7
     },
     "Labour Day": {
