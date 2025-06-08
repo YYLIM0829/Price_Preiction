@@ -9,6 +9,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from google.cloud import firestore
 import pytz
+LOCAL_TZ = pytz.timezone('Asia/Kuala_Lumpur')
 import requests
 import io
 import matplotlib.pyplot as plt
@@ -16,6 +17,21 @@ from dateutil.relativedelta import relativedelta
 import holidays
 from ipywidgets import interact, Dropdown, DatePicker, Output
 from IPython.display import display
+from google.oauth2 import service_account
+import os
+from flask import Flask, request, jsonify
+from github import Github
+
+app = Flask(__name__)
+
+# Initialize Firestore client
+if os.path.exists(FIREBASE_KEY_PATH):
+    cred = service_account.Credentials.from_service_account_file(FIREBASE_KEY_PATH)
+    db = firestore.Client(credentials=cred)
+else:
+    print("Firebase key file not found. Some functions will not work.")
+    db = None
+
 
 FESTIVAL_DISCOUNTS = {
     'Chinese New Year': {
@@ -101,7 +117,7 @@ def is_festival_period(date):
 
     return None, None
 
-def get_festival_discount(category, festival):
+def get_festival_discount(types, festival):
     """Get discount range for a category during festival"""
     if festival not in FESTIVAL_DISCOUNTS:
         return 0
@@ -110,13 +126,13 @@ def get_festival_discount(category, festival):
 
     # Check category-specific discounts first
     if 'discount' in festival_data:
-        for discount_category, discount_range in festival_data['discount'].items():
-            if discount_category == 'all' or discount_category in category.lower():
+        for discount_types, discount_range in festival_data['discount'].items():
+            if discount_types == 'all' or discount_types in types.lower():
                 return np.random.uniform(*discount_range)
 
     return 0
 
-def get_festival_price_increase(category, festival):
+def get_festival_price_increase(types, festival):
     """Get price increase range for high-demand categories during festival"""
     if festival not in FESTIVAL_DISCOUNTS:
         return 0
@@ -124,56 +140,44 @@ def get_festival_price_increase(category, festival):
     festival_data = FESTIVAL_DISCOUNTS[festival]
 
     if 'price_increase' in festival_data:
-        for inc_category, inc_range in festival_data['price_increase'].items():
-            if inc_category in category.lower():
+        for inc_types, inc_range in festival_data['price_increase'].items():
+            if inc_types in types.lower():
                 return np.random.uniform(*inc_range)
 
     return 0
 
 def load_data_from_firestore():
-    """Load product data from Firestore"""
+    """Load product data from Firestore with timezone handling"""
     products_ref = db.collection('products')
     docs = products_ref.stream()
 
     data = []
     for doc in docs:
         product = doc.to_dict()
+        last_updated = product.get('last_updated')
+
+        if last_updated and last_updated.tzinfo is None:
+            last_updated = last_updated.replace(tzinfo=LOCAL_TZ)
+
         data.append({
             'name': product.get('name', ''),
             'type': product.get('type', ''),
             'price': product.get('price', 0),
             'future_price': product.get('future_price', 0),
-            'last_updated': product.get('last_updated', datetime.now()).astimezone(LOCAL_TZ)
+            'last_updated': last_updated or datetime.now(LOCAL_TZ)
         })
 
     return pd.DataFrame(data)
 
 def load_historical_data():
-    """Load historical data with robust column handling"""
+    """Load historical data with timezone handling"""
     try:
         response = requests.get(GITHUB_RAW_URL)
         response.raise_for_status()
-        
-        # Define expected columns and their default values
-        expected_columns = {
-            'date': None,
-            'product': None,
-            'category': None,
-            'price': None,
-            'predicted_price': 0.0,
-            'discount': 0.0,
-            'festival': ''
-        }
-        
-        # Load the data
+
         df = pd.read_csv(io.StringIO(response.text))
-        
-        # Add missing columns with default values
-        for col, default_val in expected_columns.items():
-            if col not in df.columns:
-                df[col] = default_val
-        
-        # Convert date column with multiple format attempts
+
+        # 转换日期列并确保时区感知
         date_formats = ['%d/%m/%Y', '%m/%d/%Y', '%Y-%m-%d']
         for fmt in date_formats:
             try:
@@ -182,77 +186,175 @@ def load_historical_data():
             except ValueError:
                 continue
         else:
-            # If all formats fail, use flexible parsing
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        
-        # Drop rows with invalid dates
-        df = df.dropna(subset=['date'])
-        return df
-        
+
+        # 确保日期列是时区感知的
+        if df['date'].dt.tz is None:
+            df['date'] = df['date'].dt.tz_localize(LOCAL_TZ)
+
+        return df.dropna(subset=['date'])
+
     except Exception as e:
         print(f"Error loading historical data: {e}")
-        # Return empty DataFrame with all expected columns
-        return pd.DataFrame(columns=expected_columns.keys())
+        return pd.DataFrame(columns=['date', 'product', 'types', 'price', 'predicted_price', 'discount', 'festival'])
 
 def save_data_to_github(df):
-    """Save updated data back to GitHub (you'll need to implement proper GitHub API calls)"""
-    # This is a placeholder - in practice you'd use GitHub API or git commands
-    # For Colab, you might want to save to Google Drive instead
-    df.to_csv('product_prices_history.csv', index=False)
-    print("Data saved locally - implement GitHub upload separately")
+    """Properly save data to GitHub using API with only desired columns"""
+    try:
+        # First try to save locally as backup
+        local_path = 'product_daily_prices_2022_2025_monthly_changes.csv'
 
-def prepare_data_for_prediction(historical_df, product_name, category):
+        # Create a copy with only the columns we want
+        desired_columns = ['date', 'product', 'types', 'price', 'predicted_price', 'discount', 'festivals']
+        save_df = df.copy()
+
+        # Ensure all desired columns exist
+        for col in desired_columns:
+            if col not in save_df.columns:
+                if col == 'discount':
+                    save_df['discount'] = 0.0  # Default discount
+                elif col == 'festivals':
+                    save_df['festivals'] = ''  # Empty string for festivals
+                else:
+                    save_df[col] = '' if col == 'product' else 0.0
+
+        # Filter to only keep desired columns
+        save_df = save_df[desired_columns]
+
+        # Handle date conversion and ensure unique entries per day
+        if 'date' in save_df.columns:
+            # Convert date to consistent format and remove timezone
+            save_df['date'] = pd.to_datetime(save_df['date']).dt.tz_localize(None)
+
+            # Remove duplicates - keep last entry for each date-product combination
+            save_df = save_df.drop_duplicates(
+                subset=['date', 'product', 'types'],
+                keep='last'
+            )
+
+            # Format date as string
+            save_df['date'] = save_df['date'].dt.strftime('%Y-%m-%d')
+
+        # Round numeric columns to 2 decimal places
+        numeric_cols = ['price', 'predicted_price', 'discount']
+        for col in numeric_cols:
+            if col in save_df.columns:
+                save_df[col] = save_df[col].round(2)
+
+        # Ensure all string fields are properly converted
+        string_columns = ['product', 'types', 'festivals']
+        for col in string_columns:
+            if col in save_df.columns:
+                save_df[col] = save_df[col].astype(str)
+
+        # Save locally
+        save_df.to_csv(local_path, index=False)
+        print(f"Data saved locally to {local_path}")
+
+        # Check if GitHub token is available
+        github_token = os.getenv('GITHUB_TOKEN') or "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"
+        if not github_token:
+            print("GitHub token not found. Data saved locally only.")
+            return False
+
+        # Initialize GitHub client
+        g = Github(github_token)
+        repo = g.get_repo("YYLIM0829/Price_Preiction")
+
+        # Get file content as string
+        csv_content = save_df.to_csv(index=False)
+
+        # Try to get file SHA if exists
+        try:
+            contents = repo.get_contents("product_daily_prices_2022_2025_monthly_changes.csv")
+            # Compare with existing content to avoid unnecessary updates
+            existing_content = contents.decoded_content.decode('utf-8')
+            if existing_content == csv_content:
+                print("No changes detected, skipping GitHub update")
+                return True
+
+            update_response = repo.update_file(
+                path=contents.path,
+                message=f"Update price data",
+                content=csv_content,
+                sha=contents.sha
+            )
+            print("GitHub update successful:", update_response)
+            return True
+        except Exception as e:
+            # If file doesn't exist, create new
+            if "404" in str(e):
+                create_response = repo.create_file(
+                    path="product_daily_prices_2022_2025_monthly_changes.csv",
+                    message=f"Create price data",
+                    content=csv_content
+                )
+                print("GitHub create successful:", create_response)
+                return True
+            else:
+                print("GitHub error:", str(e))
+                return False
+
+    except Exception as e:
+        print(f"Failed to update GitHub: {str(e)}")
+        print(f"Data saved locally at: {local_path}")
+        return False
+
+def prepare_data_for_prediction(historical_df, product_name, types):
     """Prepare data with more flexible matching"""
     # Create a copy to avoid SettingWithCopyWarning
     product_data = historical_df.copy()
-    
+
     # Convert to lowercase and strip whitespace for more flexible matching
     product_data['product_clean'] = product_data['product'].astype(str).str.lower().str.strip()
     product_name_clean = str(product_name).lower().strip()
-    
-    product_data['category_clean'] = product_data['category'].astype(str).str.lower().str.strip()
-    category_clean = str(category).lower().strip()
-    
+
+    product_data['types_clean'] = product_data['types'].astype(str).str.lower().str.strip()
+    types_clean = str(types).lower().strip()
+
     # Filter for this product (more flexible matching)
     mask = (
-        (product_data['product_clean'] == product_name_clean) & 
-        (product_data['category_clean'].str.contains(category_clean))
+        (product_data['product_clean'] == product_name_clean) &
+        (product_data['types_clean'].str.contains(types_clean))
     )
-    
+
     product_data = product_data[mask].copy()
-    
+
     if product_data.empty:
-        print(f"\nWarning: No data found for product '{product_name}' in category '{category}'")
-        print("Available products in this category:")
-        print(historical_df[historical_df['category'].str.contains(category_clean, case=False)]['product'].unique())
+        print(f"\nWarning: No data found for product '{product_name}' in types '{types}'")
+        print("Available products in this types:")
+        print(historical_df[historical_df['types'].str.contains(types_clean, case=False)]['product'].unique())
         return product_data
-    
+
     # Ensure proper datetime index
     product_data['date'] = pd.to_datetime(product_data['date'], errors='coerce')
     product_data = product_data.dropna(subset=['date'])
+    product_data = product_data.sort_values('date')
+    product_data = product_data.drop_duplicates(subset=['date'], keep='last')
+
     product_data = product_data.set_index('date').sort_index()
-    
+
     # Forward fill missing values
     all_dates = pd.date_range(
         start=product_data.index.min(),
         end=product_data.index.max()
     )
     product_data = product_data.reindex(all_dates)
-    
+
     # Fill numeric columns
     for col in ['price', 'predicted_price', 'discount']:
         product_data[col] = product_data[col].ffill().fillna(0)
-    
+
     # Fill string columns
-    for col in ['product', 'category', 'festival']:
+    for col in ['product', 'types', 'festival']:
         product_data[col] = product_data[col].ffill().fillna('')
-    
+
     # Feature engineering
     product_data['day_of_week'] = product_data.index.dayofweek
     product_data['day_of_month'] = product_data.index.day
     product_data['month'] = product_data.index.month
     product_data['year'] = product_data.index.year
-    
+
     return product_data
 
 def knn_predict(product_data, days_ahead=1):
@@ -351,9 +453,9 @@ def lstm_predict(product_data, days_ahead=1):
 
     return prediction, mae
 
-def predict_product_price(product_name, category, historical_data, days_ahead=1):
+def predict_product_price(product_name, types, historical_data, days_ahead=1):
     """Predict price using all models and return the best prediction"""
-    product_data = prepare_data_for_prediction(historical_data, product_name, category)
+    product_data = prepare_data_for_prediction(historical_data, product_name, types)
 
     if len(product_data) < 7:  # Not enough data
         return None, {'knn': None, 'rf': None, 'lstm': None}
@@ -368,8 +470,8 @@ def predict_product_price(product_name, category, historical_data, days_ahead=1)
     festival, festival_date = is_festival_period(target_date)
 
     if festival:
-        discount = get_festival_discount(category, festival)
-        price_increase = get_festival_price_increase(category, festival)
+        discount = get_festival_discount(types, festival)
+        price_increase = get_festival_price_increase(types, festival)
 
         knn_pred *= (1 - discount) * (1 + price_increase)
         rf_pred *= (1 - discount) * (1 + price_increase)
@@ -393,97 +495,96 @@ def predict_product_price(product_name, category, historical_data, days_ahead=1)
         return lstm_pred, models
 
 def update_firestore_predictions():
-    """Main function with improved column handling"""
-    # Load current data
-    current_products = load_data_from_firestore()
-    historical_data = load_historical_data()
-    
-    # Validate and clean historical data
-    if not historical_data.empty:
-        # Ensure all required columns exist
-        required_columns = [
-            'date', 'product', 'category', 'price',
-            'predicted_price', 'discount', 'festival'
-        ]
-        
-        for col in required_columns:
-            if col not in historical_data.columns:
-                if col == 'discount':
-                    historical_data[col] = 0.0
-                elif col == 'festival':
-                    historical_data[col] = ''
-                else:
-                    raise ValueError(f"Missing required column: {col}")
-        
-        # Ensure date column is datetime and timezone-aware
-        if not pd.api.types.is_datetime64_any_dtype(historical_data['date']):
-            historical_data['date'] = pd.to_datetime(
-                historical_data['date'],
-                errors='coerce'
-            )
-        
-        # Localize to the same timezone if not already aware
-        if historical_data['date'].dt.tz is None:
-            historical_data['date'] = historical_data['date'].dt.tz_localize(LOCAL_TZ)
-        else:
-            historical_data['date'] = historical_data['date'].dt.tz_convert(LOCAL_TZ)
-            
-        historical_data = historical_data.dropna(subset=['date'])
-        
-        # Ensure numeric columns are float
-        for col in ['price', 'predicted_price', 'discount']:
-            historical_data[col] = pd.to_numeric(
-                historical_data[col],
-                errors='coerce'
-            ).fillna(0)
-    
-    # Prepare today's date with proper timezone
-    today = datetime.now(LOCAL_TZ)
-    
-    # Update historical data with current prices
-    new_rows = []
-    for _, row in current_products.iterrows():
-        new_rows.append({
-            'date': today,  # This is already timezone-aware
-            'product': str(row['name']),
-            'category': str(row['type']),
-            'price': float(row['price']),
-            'predicted_price': float(row.get('future_price', 0)),
-            'discount': 0.0,
-            'festival': ''
-        })
-    
-    # Combine old and new data
-    updated_data = pd.concat([
-        historical_data,
-        pd.DataFrame(new_rows)
-    ], ignore_index=True)
-    
-    # Ensure all dates are timezone-aware and in the same timezone
-    if 'date' in updated_data and updated_data['date'].dt.tz is None:
-        updated_data['date'] = updated_data['date'].dt.tz_localize(LOCAL_TZ)
-    
-    # Ensure proper sorting by date
-    updated_data = updated_data.sort_values('date')
-    
-    # Predict next day's prices and update Firestore
-    for _, row in current_products.iterrows():
-        predicted_price, model_results = predict_product_price(
-            row['name'], row['type'], updated_data
-        )
-        
-        if predicted_price is not None:
-            # Update Firestore
-            product_ref = db.collection('products').where('name', '==', row['name']).limit(1).get()
-            for doc in product_ref:
-                doc.reference.update({
-                    'future_price': float(predicted_price),
-                    'last_updated': datetime.now(LOCAL_TZ)
-                })
-    
-    # Save updated historical data
-    save_data_to_github(updated_data)
-    print("Price predictions updated successfully")
+    """Main function with improved error handling"""
+    try:
+        if db is None:
+            print("Firestore not initialized - skipping update")
+            return False
+
+        # Load current data
+        current_products = load_data_from_firestore()
+        historical_data = load_historical_data()
+
+        if current_products.empty:
+            print("No products found in Firestore")
+            return False
+
+        # 确保 today 是时区感知的
+        today = datetime.now(LOCAL_TZ)
+
+        print("Products loaded from Firestore:")
+        print(current_products[['name', 'type', 'price']].to_string())
+
+        # Update historical data with current prices
+        new_rows = []
+        for _, row in current_products.iterrows():
+            # 确保从Firestore获取的时间是时区感知的
+            last_updated = row.get('last_updated')
+            if last_updated and last_updated.tzinfo is None:
+                last_updated = last_updated.replace(tzinfo=LOCAL_TZ)
+
+            # Check for festival and set discount
+            festival, festival_date = is_festival_period(today)
+            if festival:
+                discount = get_festival_discount(row.get('type', 'Unknown'), festival)
+                festival_name = festival
+            else:
+                discount = 0.0
+                festival_name = ''
+
+            new_rows.append({
+                'date': today,
+                'product': str(row.get('name', '')),
+                'types': str(row.get('type', 'Unknown')),
+                'price': float(row.get('price', 0)),
+                'predicted_price': float(row.get('future_price', 0)),
+                'discount': float(discount),
+                'festival': festival_name
+            })
+
+        # Create new DataFrame for current data
+        current_df = pd.DataFrame(new_rows)
+
+        # Combine with historical data
+        updated_data = pd.concat([historical_data, current_df], ignore_index=True)
+        updated_data = updated_data.sort_values('date')
+
+        # Predict and update Firestore
+        success_count = 0
+        for _, row in current_products.iterrows():
+            try:
+                predicted_price, _ = predict_product_price(
+                    row['name'],
+                    row.get('type', 'Unknown'),
+                    updated_data
+                )
+
+                if predicted_price is not None:
+                    # Update Firestore
+                    docs = db.collection('products').where('name', '==', row['name']).limit(1).stream()
+                    for doc in docs:
+                        doc.reference.update({
+                            'future_price': round(float(predicted_price), 2),
+                            'last_updated': datetime.now(LOCAL_TZ),
+                            'type': row.get('type', 'Unknown')  # Ensure type is saved
+                        })
+                        success_count += 1
+                        print(f"Updated {row['name']} successfully")
+
+            except Exception as e:
+                print(f"Error updating {row['name']}: {str(e)}")
+
+        print(f"Successfully updated {success_count}/{len(current_products)} products")
+
+        # Save data to GitHub
+        if not save_data_to_github(updated_data):
+            print("Warning: GitHub save failed")
+
+        return success_count > 0
+
+    except Exception as e:
+        print(f"Critical error in update_firestore_predictions: {str(e)}")
+        return False
 
 # Admin Interface
 def create_admin_interface():
@@ -521,8 +622,8 @@ def create_admin_interface():
             if not product_name:
                 return
 
-            category = historical_data[historical_data['product'] == product_name]['category'].iloc[0]
-            product_data = prepare_data_for_prediction(historical_data, product_name, category)
+            types = historical_data[historical_data['product'] == product_name]['types'].iloc[0]
+            product_data = prepare_data_for_prediction(historical_data, product_name, types)
 
             # Plot historical prices
             plt.figure(figsize=(12, 6))
@@ -541,7 +642,7 @@ def create_admin_interface():
                 return
 
             predicted_price, model_results = predict_product_price(
-                product_name, category, historical_data, days_ahead
+                product_name, types, historical_data, days_ahead
             )
 
             print(f"Predicted price for {target_date}: RM{predicted_price:.2f}\n")
@@ -567,10 +668,70 @@ def create_admin_interface():
     display(product_dropdown, model_dropdown, date_picker, output)
     on_parameter_change(None)  # Initial call
 
+
+@app.route('/get_festivals', methods=['GET'])
+def get_festivals():
+    try:
+        festivals_data = {}
+        for festival_name, details in FESTIVAL_DISCOUNTS.items():
+            # Default to January if no month can be determined
+            month = 1
+            
+            # Try to get month from the hardcoded dates
+            if festival_name in {
+                'Chinese New Year', 'Labour Day', 'Hari Raya', 
+                'Father\'s Day', 'Mother\'s Day', 'Deepavali',
+                'Christmas', 'National Day', '11.11 Sale',
+                'Black Friday', 'Year-End Sale'
+            }:
+                # Get from your hardcoded festival dates
+                festival_dates = {
+                    'Chinese New Year': [(1, 22), (1, 23)],
+                    'Labour Day': [(5, 1)],
+                    # ... [other dates from your is_festival_period function] ...
+                }
+                if festival_name in festival_dates:
+                    month = festival_dates[festival_name][0][0]  # Get month from first date tuple
+            
+            effect = "up" if 'price_increase' in details else "down"
+            
+            # Get range values - taking the first category's range
+            if effect == "up":
+                ranges = next(iter(details['price_increase'].values()))
+            else:
+                ranges = next(iter(details['discount'].values()))
+            
+            festivals_data[festival_name] = {
+                "month": month,
+                "effect": effect,
+                "range": [float(ranges[0]), float(ranges[1])],  # Ensure float for JSON
+                "duration": details['duration']
+            }
+        
+        return jsonify({
+            "success": True,
+            "festivals": festivals_data
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e)
+        })
+
 # Main execution
 if __name__ == "__main__":
     # For daily runs in Colab
+    if db is not None:
+        try:
+            docs = db.collection('products').limit(1).stream()
+            print("Firestore connection successful")
+        except Exception as e:
+            print("Firestore connection failed:", str(e))
+
+    # Run the main function
     update_firestore_predictions()
+    app.run(host='0.0.0.0', port=5000)
 
     # Uncomment to enable admin interface when running interactively
     # create_admin_interface()
+
