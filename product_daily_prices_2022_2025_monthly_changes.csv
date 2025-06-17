@@ -8847,10 +8847,3 @@ date,product,types,price,predicted_price,discount,festivals
 2025-06-17,Durian Fruit,fruit,23.93,23.93,0.0,nan
 2025-06-17,product2,"watch,sport",488.77,488.77,0.0,nan
 2025-06-17,product3,"phone,sport",170.16,170.16,0.0,nan
-2025-06-17,Mango Fruit,fruit,10.86,9.68,0.0,nan
-2025-06-17,Durian Fruit,fruit,23.93,21.19,0.0,nan
-2025-06-17,product2,"watch,sport",488.77,448.43,0.0,nan
-2025-06-17,product3,"phone,sport",170.16,163.0,0.0,nan
-2025-06-17,product4,sport,3583.82,3361.2,0.0,nan
-2025-06-17,product5,"toy,watch",8.68,7.98,0.0,nan
-2025-06-17,product6,toy,118.85,111.59,0.0,nan
