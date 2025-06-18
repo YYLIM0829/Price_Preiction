@@ -8847,17 +8847,10 @@ date,product,types,price,predicted_price,discount,festival
 2025-06-17,product4,sport,3583.82,3583.82,0.0,nan
 2025-06-17,Mango Fruit,fruit,10.86,10.95,0.0,nan
 2025-06-17,product5,"toy,watch",8.68,8.68,0.0,nan
-2025-06-18,product6,toy,115.85,101.65,0.05,nan
-2025-06-18,product4,sport,3283.82,3303.57,0.15,nan
-2025-06-18,product3,"phone,sport",157.0,162.85,0.07,nan
-2025-06-18,product5,"toy,watch",8.0,7.69,0.13,nan
-2025-06-18,Durian Fruit,fruit,22.0,20.72,0.09,nan
-2025-06-18,Mango Fruit,fruit,10.86,9.9,0.08,nan
-2025-06-18,product2,"watch,sport",420.77,419.39,0.12,nan
-2025-06-18,Mango Fruit,fruit,10.86,10.25,0.1,Father's Day
-2025-06-18,Durian Fruit,fruit,22.0,21.29,0.11,Father's Day
-2025-06-18,product2,"watch,sport",420.77,456.21,0.12,Father's Day
+2025-06-18,product6,toy,115.85,101.65,0.05,Father's Day
+2025-06-18,product4,sport,3283.82,3303.57,0.15,Father's Day
 2025-06-18,product3,"phone,sport",157.0,151.25,0.09,Father's Day
-2025-06-18,product4,sport,3283.82,3231.15,0.09,Father's Day
-2025-06-18,product5,"toy,watch",8.0,8.12,0.06,Father's Day
-2025-06-18,product6,toy,115.85,112.23,0.11,Father's Day
+2025-06-18,product5,"toy,watch",8.0,7.69,0.13,Father's Day
+2025-06-18,Durian Fruit,fruit,22.0,20.72,0.09,Father's Day
+2025-06-18,Mango Fruit,fruit,10.86,9.9,0.08,Father's Day
+2025-06-18,product2,"watch,sport",420.77,419.39,0.12,Father's Day
