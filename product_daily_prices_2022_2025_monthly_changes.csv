@@ -8854,10 +8854,10 @@ date,product,types,price,predicted_price,discount,festivals
 2025-06-18,product4,sport,3583.82,3284.62,0.06,nan
 2025-06-18,product6,toy,118.85,106.19,0.15,nan
 2025-06-18,product2,"watch,sport",488.77,448.25,0.11,nan
-2025-06-18,Mango Fruit,fruit,10.86,9.86,0.07,nan
-2025-06-18,Durian Fruit,fruit,23.93,20.77,0.09,nan
+2025-06-18,Mango Fruit,fruit,10.86,9.86,0.1,nan
+2025-06-18,Durian Fruit,fruit,23.93,20.77,0.1,nan
 2025-06-18,product2,"watch,sport",488.77,417.66,0.09,nan
-2025-06-18,product3,"phone,sport",170.16,145.13,0.13,nan
-2025-06-18,product4,sport,3583.82,3402.54,0.07,nan
-2025-06-18,product5,"toy,watch",8.68,7.98,0.07,nan
-2025-06-18,product6,toy,118.85,105.34,0.12,nan
+2025-06-18,product3,"phone,sport",170.16,145.13,0.12,nan
+2025-06-18,product4,sport,3583.82,3402.54,0.08,nan
+2025-06-18,product5,"toy,watch",8.68,7.98,0.12,nan
+2025-06-18,product6,toy,118.85,105.34,0.07,nan
