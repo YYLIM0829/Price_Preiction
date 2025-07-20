@@ -9043,10 +9043,31 @@ date,product,types,price,predicted_price,discount,festival
 2025-07-15,Durian Fruit,fruit,22.0,22.43,0.0,nan
 2025-07-15,Mango Fruit,fruit,10.86,11.03,0.0,nan
 2025-07-15,product2,"watch,sport",420.77,422.31,0.0,nan
-2025-07-16,Mango Fruit,fruit,10.86,10.92,0.0,
-2025-07-16,Durian Fruit,fruit,22.0,22.44,0.0,
-2025-07-16,product2,"watch,sport",420.77,422.55,0.0,
-2025-07-16,product3,"phone,sport",158.2,159.39,0.0,
-2025-07-16,product4,sport,3283.82,3276.28,0.0,
-2025-07-16,product5,"toy,watch",8.0,8.19,0.0,
-2025-07-16,product6,toy,115.85,115.74,0.0,
+2025-07-16,Mango Fruit,fruit,10.86,10.92,0.0,nan
+2025-07-16,Durian Fruit,fruit,22.0,22.44,0.0,nan
+2025-07-16,product2,"watch,sport",420.77,422.55,0.0,nan
+2025-07-16,product3,"phone,sport",158.2,159.39,0.0,nan
+2025-07-16,product4,sport,3283.82,3276.28,0.0,nan
+2025-07-16,product5,"toy,watch",8.0,8.19,0.0,nan
+2025-07-16,product6,toy,115.85,115.74,0.0,nan
+2025-07-17,Mango Fruit,fruit,10.86,10.92,0.0,nan
+2025-07-17,Durian Fruit,fruit,22.0,22.44,0.0,nan
+2025-07-17,product2,"watch,sport",420.77,422.55,0.0,nan
+2025-07-17,product3,"phone,sport",158.2,159.39,0.0,nan
+2025-07-17,product4,sport,3283.82,3276.28,0.0,nan
+2025-07-17,product5,"toy,watch",8.0,8.19,0.0,nan
+2025-07-17,product6,toy,115.85,115.74,0.0,nan
+2025-07-18,Mango Fruit,fruit,10.86,10.92,0.0,nan
+2025-07-18,Durian Fruit,fruit,22.0,22.44,0.0,nan
+2025-07-18,product2,"watch,sport",420.77,422.55,0.0,nan
+2025-07-18,product3,"phone,sport",158.2,159.39,0.0,nan
+2025-07-18,product4,sport,3283.82,3276.28,0.0,nan
+2025-07-18,product5,"toy,watch",8.0,8.19,0.0,nan
+2025-07-18,product6,toy,115.85,115.74,0.0,nan
+2025-07-19,Mango Fruit,fruit,10.86,10.92,0.0,nan
+2025-07-19,Durian Fruit,fruit,22.0,22.44,0.0,nan
+2025-07-19,product2,"watch,sport",420.77,422.55,0.0,nan
+2025-07-19,product3,"phone,sport",158.2,159.39,0.0,nan
+2025-07-19,product4,sport,3283.82,3276.28,0.0,nan
+2025-07-19,product5,"toy,watch",8.0,8.19,0.0,nan
+2025-07-19,product6,toy,115.85,115.74,0.0,nan
